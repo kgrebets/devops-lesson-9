@@ -1,217 +1,147 @@
 # Jenkins + Argo CD CI/CD Project
 
-## Project Overview
+## Overview
 
-This project implements a full CI/CD pipeline for a Django application on Amazon EKS with:
+This repository provisions and operates a full CI/CD + GitOps stack on AWS:
 
-- Terraform for infrastructure provisioning
-- Jenkins (installed by Helm via Terraform) for CI
-- Amazon ECR for container images
-- Argo CD (installed by Helm via Terraform) for GitOps-based CD
-- Helm chart for Kubernetes application deployment
+- Terraform provisions infrastructure and platform components.
+- Jenkins (Helm) builds and publishes Docker images to ECR.
+- Argo CD (Helm) watches Git and deploys Helm chart changes to EKS.
+- The same repository is used as infra + GitOps source.
 
-The pipeline flow is:
+Current defaults:
 
-1. Jenkins builds Docker image with Kaniko.
-2. Jenkins pushes image to ECR.
-3. Jenkins updates image tag in Helm values.yaml in Git.
-4. Argo CD detects Git change and syncs to EKS automatically.
+- AWS region: `eu-north-1`
+- EKS cluster: `lesson-7-eks`
+- ECR repository: `lesson-5-ecr`
+- Jenkins namespace: `jenkins`
+- Argo CD namespace: `argocd`
+- GitOps chart path: `modules/charts/django-app`
 
-## Project Structure
+## Current Repository Layout
 
 ```text
-Project/
+.
 ├── main.tf
 ├── backend.tf
 ├── outputs.tf
-│
+├── Jenkinsfile
 ├── modules/
 │   ├── s3-backend/
-│   │   ├── s3.tf
-│   │   ├── dynamodb.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   │
 │   ├── vpc/
-│   │   ├── vpc.tf
-│   │   ├── routes.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   │
 │   ├── ecr/
-│   │   ├── ecr.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   │
 │   ├── eks/
-│   │   ├── eks.tf
-│   │   ├── aws_ebs_csi_driver.tf
-│   │   ├── variables.tf
-│   │   └── outputs.tf
-│   │
 │   ├── jenkins/
-│   │   ├── jenkins.tf
-│   │   ├── variables.tf
-│   │   ├── providers.tf
-│   │   ├── values.yaml
-│   │   └── outputs.tf
-│   │
-│   └── argo_cd/
-│       ├── jenkins.tf
-│       ├── variables.tf
-│       ├── providers.tf
-│       ├── values.yaml
-│       ├── outputs.tf
-│       └── charts/
-│           ├── Chart.yaml
-│           ├── values.yaml
-│           └── templates/
-│               ├── application.yaml
-│               └── repository.yaml
-│
-├── charts/
-│   └── django-app/
-│       ├── templates/
-│       │   ├── deployment.yaml
-│       │   ├── service.yaml
-│       │   ├── configmap.yaml
-│       │   └── hpa.yaml
-│       ├── Chart.yaml
-│       └── values.yaml
+│   ├── argo_cd/
+│   └── charts/
+│       └── django-app/
 └── README.md
 ```
 
-## Components
+## What Terraform Deploys
 
-### S3 Backend + DynamoDB
+1. S3 + DynamoDB for Terraform state and locking.
+2. VPC with public/private subnets, routes, IGW, NAT.
+3. ECR repository for application images.
+4. EKS cluster + managed node group + EBS CSI addon.
+5. Jenkins via Helm, including:
+   - persistent volume via EBS CSI storage class,
+   - IRSA role for agent pod ECR push,
+   - JCasC credentials and seed job.
+6. Argo CD via Helm + local app chart with:
+   - Application definition,
+   - repository config,
+   - automated sync (`prune` + `selfHeal`).
 
-- S3 stores Terraform state.
-- DynamoDB provides state locking.
+## Jenkins Pipeline (Current)
 
-### VPC
+`Jenkinsfile` stages:
 
-- VPC
-- Public and private subnets
-- Internet gateway and NAT gateway
-- Route tables
+1. Checkout application source from `APP_REPOSITORY`.
+2. Build and push image with Kaniko to `${ECR_REPOSITORY}:${IMAGE_TAG}`.
+3. Clone `GITOPS_REPOSITORY`.
+4. Update image `repository` and `tag` in `GITOPS_VALUES_FILE`.
+5. Commit and push to `main`.
 
-### ECR
+Important current behavior:
 
-- Stores Docker images for the Django application.
+- Build context and Dockerfile use `${WORKSPACE}/app-src`.
+- GitOps working copy uses `${WORKSPACE}/gitops`.
+- Image tag format: `${BUILD_NUMBER}-${short_commit_or_manual}`.
 
-### EKS
-
-- EKS control plane and managed node group
-- OIDC provider for IRSA
-- EBS CSI driver addon for persistent volumes
-
-### Jenkins
-
-Installed via Helm from Terraform module modules/jenkins.
-
-Includes:
-
-- Persistent storage via EBS CSI-backed StorageClass
-- IRSA role for Kubernetes agent pods
-- Service account jenkins-sa for Kaniko/Git agents
-- JCasC credentials and seed job creation
-
-Default admin credentials:
-
-- Username: admin
-- Password: admin123
-
-### Jenkinsfile CI
-
-Jenkinsfile stages:
-
-1. Clone app repository
-2. Build and push image to ECR with Kaniko
-3. Clone GitOps/infra repository
-4. Update values.yaml image repository/tag
-5. Commit and push to main
-
-### Argo CD
-
-Installed via Helm from Terraform module modules/argo_cd.
-
-Includes:
-
-- Argo CD release from official argo-helm repository
-- Local argo-apps chart that creates:
-  - Argo CD Application resource
-  - Repository credentials Secret (for private repo access)
-- Automated sync policy:
-  - prune: true
-  - selfHeal: true
-
-Argo CD tracks repository and chart path configured in module argo_cd in main.tf.
-
-## CI/CD Scheme
+## GitOps Flow
 
 ```mermaid
 flowchart LR
-    A[Push to application source] --> B[Jenkins pipeline]
+    A[Run Jenkins pipeline] --> B[Clone app source]
     B --> C[Kaniko build]
-    C --> D[Push to ECR]
-    D --> E[Update Helm values.yaml in Git]
-    E --> F[Push commit to main]
-    F --> G[Argo CD watches Git]
-    G --> H[Auto sync to EKS]
+    C --> D[Push image to ECR]
+    D --> E[Update modules/charts/django-app/values.yaml]
+    E --> F[Commit and push to main]
+    F --> G[Argo CD detects Git change]
+    G --> H[Sync to EKS]
 ```
 
-## Terraform Commands
+## Deploy / Update
 
 ```bash
 terraform init
 terraform plan
 terraform apply
-terraform destroy
 ```
 
-## Deployment and Verification
+## Post-Deploy Verification
 
-### Configure kubectl
+### 1) EKS
 
 ```bash
 aws eks update-kubeconfig --region eu-north-1 --name lesson-7-eks
 kubectl get nodes
 ```
 
-### Verify Jenkins
+### 2) Jenkins
 
 ```bash
 kubectl get pods -n jenkins
 kubectl get svc -n jenkins
-kubectl get pvc -n jenkins
 kubectl get sa -n jenkins
 ```
 
-### Verify Argo CD
+Get Jenkins admin password:
+
+```bash
+kubectl exec -n jenkins -it svc/jenkins -c jenkins -- /bin/cat /run/secrets/additional/chart-admin-password
+```
+
+### 3) Argo CD
 
 ```bash
 kubectl get pods -n argocd
 kubectl get svc -n argocd
 kubectl get applications -n argocd
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 ```
 
-Argo CD login:
+Get Argo CD admin password (PowerShell):
 
-- Username: admin
-- Password: output of the command above
-
-### Verify Django app
-
-```bash
-kubectl get deployments
-kubectl get services
-kubectl get hpa
-kubectl get pods
+```powershell
+$b64 = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}'
+[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
 ```
 
-## Notes
+## Jenkins Jobs
 
-- For private Git repositories, keep repo credentials in Jenkins and Argo CD module variables.
-- Hardcoded personal access tokens are for temporary testing only.
-- Rotate tokens immediately after testing and move secrets to safer storage.
+After Jenkins is up:
+
+1. Run `seed-job` to generate the pipeline job.
+2. Run `goit-django-docker` to execute CI and GitOps update.
+
+## Notes and Known Pitfalls
+
+- If Jenkins reports `Jenkinsfile not found`, check that the target branch actually contains `Jenkinsfile`.
+- If Kaniko cannot find Dockerfile, verify build uses a shared workspace path (currently `${WORKSPACE}/app-src`).
+- If Argo app is `Synced/Progressing`, inspect workload readiness and image pull status in the target namespace.
+
+## Security
+
+- Do not keep personal access tokens hardcoded in Terraform files.
+- Move secrets to secure inputs (TF vars, CI secrets, secret manager), rotate exposed tokens, and avoid committing credentials.
