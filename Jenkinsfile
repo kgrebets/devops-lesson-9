@@ -23,11 +23,6 @@ spec:
 """
     }
   }
-
-  options {
-    timestamps()
-  }
-
   environment {
     APP_REPOSITORY       = "${params.APP_REPOSITORY ?: 'https://github.com/kgrebets/devops-django-test-app.git'}"
     GITOPS_REPOSITORY    = "${params.GITOPS_REPOSITORY ?: 'https://github.com/kgrebets/devops-lesson-9.git'}"
