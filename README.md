@@ -134,14 +134,3 @@ After Jenkins is up:
 
 1. Run `seed-job` to generate the pipeline job.
 2. Run `goit-django-docker` to execute CI and GitOps update.
-
-## Notes and Known Pitfalls
-
-- If Jenkins reports `Jenkinsfile not found`, check that the target branch actually contains `Jenkinsfile`.
-- If Kaniko cannot find Dockerfile, verify build uses a shared workspace path (currently `${WORKSPACE}/app-src`).
-- If Argo app is `Synced/Progressing`, inspect workload readiness and image pull status in the target namespace.
-
-## Security
-
-- Do not keep personal access tokens hardcoded in Terraform files.
-- Move secrets to secure inputs (TF vars, CI secrets, secret manager), rotate exposed tokens, and avoid committing credentials.
