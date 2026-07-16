@@ -39,8 +39,8 @@ spec:
           withCredentials([usernamePassword(credentialsId: 'github-token', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
             sh '''#!/bin/sh
               set -eu
-              rm -rf /workspace/app-src
-              git clone "https://${GIT_USERNAME}:${GIT_TOKEN}@${APP_REPOSITORY#https://}" /workspace/app-src
+              rm -rf "${WORKSPACE}/app-src"
+              git clone "https://${GIT_USERNAME}:${GIT_TOKEN}@${APP_REPOSITORY#https://}" "${WORKSPACE}/app-src"
             '''
           }
         }
@@ -53,8 +53,8 @@ spec:
           sh '''#!/busybox/sh
             set -eu
             /kaniko/executor \
-              --context=/workspace/app-src \
-              --dockerfile=/workspace/app-src/Dockerfile \
+              --context="${WORKSPACE}/app-src" \
+              --dockerfile="${WORKSPACE}/app-src/Dockerfile" \
               --destination=${ECR_REPOSITORY}:${IMAGE_TAG} \
               --cache=true
           '''
@@ -68,10 +68,10 @@ spec:
           withCredentials([usernamePassword(credentialsId: 'github-token', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
             sh '''#!/bin/sh
               set -eu
-              rm -rf /workspace/gitops
-              git clone "https://${GIT_USERNAME}:${GIT_TOKEN}@${GITOPS_REPOSITORY#https://}" /workspace/gitops
+              rm -rf "${WORKSPACE}/gitops"
+              git clone "https://${GIT_USERNAME}:${GIT_TOKEN}@${GITOPS_REPOSITORY#https://}" "${WORKSPACE}/gitops"
 
-              cd /workspace/gitops
+              cd "${WORKSPACE}/gitops"
               if [ ! -f "${GITOPS_VALUES_FILE}" ]; then
                 echo "values file not found: ${GITOPS_VALUES_FILE}" >&2
                 exit 1
